@@ -1,4 +1,4 @@
-LDAP ALl The Things!
+LDAP All The Things!
 ====================
 
 multi-forest LDAP authenticator proxy wotsit
@@ -20,7 +20,7 @@ License
 =======
 Simplified BSD, yo.
 
-Copyright (c) 20120, Greg Boyington
+Copyright (c) 2012, Greg Boyington
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
