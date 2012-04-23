@@ -1,6 +1,9 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 
 use strict;
+use Data::Dumper;
+use FindBin;
+use lib "$FindBin::Bin";
 require ldaphuntress;
 
 my $port = 52323;
@@ -23,12 +26,13 @@ sub Run {
 
 # start listening
 package main;
+
 my $server = listener->new({
+	localaddr => '127.0.0.1',
 	localport => $port,
-	logfile   => 'STDERR',
 	pidfile   => 'none',
-	mode      => 'fork'
-});
+	mode      => 'fork',
+}, \@ARGV);
 $server->Bind;
 
 1;

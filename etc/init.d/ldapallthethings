@@ -1,0 +1,61 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          ldapallthethings
+# Required-Start:    $local_fs $remote_fs $network
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: start/stop LDAP All The Things authentication proxy server
+### END INIT INFO
+
+set -e
+
+LDAPALLTHETHINGS_HOME=/usr/local/share/ldapallthethings
+LDAPALLTHETHINGS_PIDFILE=/var/run/ldapallthethings.pid
+LDAPALLTHETHINGS_USER=nobody
+LDAPALLTHETHINGS_GROUP=nogroup
+
+. /lib/lsb/init-functions
+
+do_start() {
+	if [ -x $LDAPALLTHETHINGS_HOME/ldapallthethings.pl ]; then
+	        [ "$VERBOSE" != no ] && log_begin_msg "Starting LDAP All The Things server..."
+		$LDAPALLTHETHINGS_HOME/ldapallthethings.pl \
+			--pidfile=$LDAPALLTHETHINGS_PIDFILE \
+			--user=$LDAPALLTHETHINGS_USER \
+			--group=$LDAPALLTHETHINGS_GROUP &
+		ES=$?
+		[ "$VERBOSE" != no ] && log_end_msg $ES
+		return $ES
+	fi
+}
+do_stop() {
+	if [ -f $LDAPALLTHETHINGS_PIDFILE ]; then
+	        [ "$VERBOSE" != no ] && log_begin_msg "Stopping LDAP All The Things server... "
+		kill `cat $LDAPALLTHETHINGS_PIDFILE`;
+		ES=$?
+		[ "$VERBOSE" != no ] && log_end_msg $ES
+		return $ES
+	fi
+}
+
+case "$1" in
+    start)
+	do_start
+        ;;
+    reload|force-reload)
+        echo "Error: argument '$1' not supported" >&2
+        exit 3
+        ;;
+    stop)
+		do_stop
+        ;;
+    restart)
+		do_stop
+		do_start
+		;;
+    *)
+        echo "Usage: $0 start|stop" >&2
+        exit 3
+        ;;
+esac
