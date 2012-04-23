@@ -7,46 +7,7 @@ use strict;
 use Net::LDAP;
 use Data::Dumper;
 use base 'Net::LDAP::Server';
-
-# hashref containing LDAP host definitions keyed by DN.
-my $providers = { 
-
-	# an AD server running on localhost
-	'dc=foo,dc=bar,dc=org' => {
-		host	       => '127.0.0.1',
-		search_port	   => 3268,
-		modify_port    => 389,
-		version        => 3,
-		binddn         => 'foo_user@foo.bar.org',
-		bindpw         => 'foo_pass',
-		filter         => '(&(objectClass=organizationalPerson)(objectClass=user)(%s))',
-		uid_field      => 'sAMAccountName',
-	},
-
-	# legacy domain with two AD servers
-	'dc=legacy,dc=baz,=dc=com' => {
-		host	       => 'ad1.legacy.baz.com,ad2.legacy.baz.com',
-		search_port	   => 3268,
-		modify_port    => 389,
-		version        => 3,
-		binddn         => 'legacy_user@legacy.baz.com',
-		bindpw         => 'legacy_pass',
-		filter         => '(&(objectClass=organizationalPerson)(objectClass=user)(%s))',
-		uid_field      => 'sAMAccountName',
-	},
-
-	# OpenLDAP server for customers that authenticates with email addresses. 
-	'dc=customers,dc=legacy,dc=baz,=dc=com' => {
-		host	       => 'ext1.legacy.baz.com',
-		search_port	   => 389,
-		modify_port    => 389,
-		version        => 3,
-		binddn         => 'legacy_user@customer.baz.com',
-		bindpw         => 'legacy_pass',
-		filter         => '(&(objectclass=Customer)(%s))',
-		uid_field      => 'mail',
-	},
-};
+use base 'providers';
 
 # set up some LDAP query return value constants
 use constant RESULT_MISSING => {
@@ -64,7 +25,6 @@ use constant RESULT_OK => {
 	'errorMessage' => '',
 	'resultCode' => Net::LDAP::Constant::LDAP_SUCCESS
 };
-
 
 sub bind {
 	# Handle bind requests by iterating over every provider, 
@@ -88,8 +48,8 @@ sub bind {
 	$user =~ s/(CN=[^,]+).*/$1/i;
 
 	# step through each LDAP provider and look for the user
-	foreach my $key ( keys %$providers ) {
-		my $conf = $providers->{ $key };	
+	foreach my $key ( keys %$providers::dn ) {
+		my $conf = $providers::dn->{ $key };	
 
 		# Step through the comma-separated list of hosts for 
 		# this provider definition, and try to connect. We 
@@ -115,7 +75,7 @@ sub bind {
 		# bind to the ldap provider so we can search.
 		my $res = $con->bind( $conf->{'binddn'}, password => $conf->{'bindpw'} );
 		if ( $res->is_error ) {
-			print "Could not bind as $conf->{'binddn'}: $res->error\n";
+			print "Could not bind as $conf->{'binddn'}: ", $res->error, "\n";
 			return { 'error' => $res->error };
 		}
 	
@@ -155,6 +115,8 @@ sub bind {
 			$res = $con->bind( $obj, password => $pass );
 			if ( $res->is_error ) {
 				print "Failed to bind as $user on ", $con->host(), ":", $res->error,"\n";
+
+				next unless $conf->{'unlock'};
 
 				# many Active Directory servers have an account lockout policy for 
 				# multiple consecutive failed authentication attempts.  We don't want 
@@ -197,12 +159,28 @@ sub search {
 	
 	my $self = shift;
 	my $req  = shift;
-
 	my $res;
 
 	# we only process equality searches
 	my $username = $req->{'filter'}->{'equalityMatch'}->{'assertionValue'};
-	return RESULT_OK, { error => "Invalid query" }
+
+	# some LDAP clients will construct an equality match with multiple 
+	# (empty) assertions.  We step through them and look for the uid. 
+	# Note that this has the effect of *ignoring* other assertions!
+	#
+	# Works for apache's mod_auth_ldap thus:
+	#
+	# AuthLDAPURL "ldap://127.0.0.1:52323/DC=foo,DC=org;DC=bar,DC=org?uid" NONE
+	#
+	if ( ! $username && exists $req->{'filter'}->{'and'} ) {
+		foreach my $clause ( @{ $req->{'filter'}->{'and'} } ) {
+			if ( exists $clause->{'equalityMatch'} && $clause->{'equalityMatch'}->{'attributeDesc'} eq 'uid' ) {
+				$username = $clause->{'equalityMatch'}->{'assertionValue'};
+				last;
+			}
+		}
+	}
+	return RESULT_INVALID
 		unless $username;
 
 	# Our search base DN is a semicolon-separated list of DNs.
@@ -212,12 +190,12 @@ sub search {
 		print "Searching for $username in $basedn...";
 	
 		# the specified base DN must be one of our providers.
-		if ( ! exists $providers->{ $basedn } ) {
+		if ( ! exists $providers::dn->{ $basedn } ) {
 			print "Invalid DN ($basedn); rejecting query.\n";
 			return RESULT_OK, { denied => 1 };
 		}
 	
-		my $conf = $providers->{ $basedn };
+		my $conf = $providers::dn->{ $basedn };
 	
 		# bind to the provider using the first host we  can connect to.
 		my $con;
@@ -264,9 +242,11 @@ sub search {
 
 	return RESULT_MISSING unless @entries;
 
-	# return *all* matching objects from all providers
+	# We should return *all* matching objects from all providers,
+	# but this will generate a "user is not unique!" error in apache's
+	# mod_auth_ldap, so we only return the first one.
 	print "Returning ", scalar @entries, " matches.\n";
-	return RESULT_OK, @entries;
+	return RESULT_OK, $entries[0];
 }
 
 1;
